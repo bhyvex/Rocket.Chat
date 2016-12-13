@@ -21,11 +21,36 @@ RocketChat.roomTypes = new class roomTypesClient extends roomTypesCommon
 		list = _.reject @roomTypesOrder, (t) -> return except.indexOf(t.identifier) isnt -1
 		return _.map list, (t) -> return t.identifier
 
+	getUserStatus: (roomType, roomId) ->
+		return @roomTypes[roomType]?.getUserStatus?(roomId)
+
 	findRoom: (roomType, identifier, user) ->
 		return @roomTypes[roomType]?.findRoom identifier, user
 
 	canSendMessage: (roomId) ->
 		return ChatSubscription.find({ rid: roomId }).count() > 0
+
+	readOnly: (roomId, user) ->
+
+		fields = { ro: 1 }
+
+		# if a user has been specified then we want to see if that user has been muted in the room
+		if user
+			fields.muted = 1
+
+		room = ChatRoom.findOne({ _id: roomId }, fields : fields)
+
+		unless user
+			return room?.ro;
+
+		return room?.ro is true and Array.isArray(room?.muted) and room?.muted.indexOf(user.username) != -1
+
+	archived: (roomId) ->
+		fields = { archived: 1 }
+
+		room = ChatRoom.findOne({ _id: roomId }, fields : fields)
+
+		return room?.archived is true
 
 	verifyCanSendMessage: (roomId) ->
 		room = ChatRoom.findOne({ _id: roomId }, { fields: { t: 1 } })

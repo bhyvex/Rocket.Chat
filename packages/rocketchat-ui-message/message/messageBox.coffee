@@ -1,3 +1,4 @@
+import toastr from 'toastr'
 katexSyntax = ->
 	if RocketChat.katex.katex_enabled()
 		return "$$KaTeX$$"   if RocketChat.katex.dollar_syntax_enabled()
@@ -26,8 +27,24 @@ Template.messageBox.helpers
 		return RocketChat.settings.get('Message_ShowFormattingTips') and (RocketChat.Markdown or RocketChat.MarkdownCode or katexSyntax())
 	canJoin: ->
 		return RocketChat.roomTypes.verifyShowJoinLink @_id
+	joinCodeRequired: ->
+		return Session.get('roomData' + this._id)?.joinCodeRequired
 	subscribed: ->
 		return RocketChat.roomTypes.verifyCanSendMessage @_id
+	allowedToSend: ->
+		if RocketChat.roomTypes.readOnly @_id, Meteor.user()
+			return false
+
+		if RocketChat.roomTypes.archived @_id
+			return false
+
+		roomData = Session.get('roomData' + this._id)
+		if roomData?.t is 'd'
+			if ChatSubscription.findOne({ rid: this._id }, { fields: { archived: 1 } })?.archived
+				return false
+
+		return true
+
 	getPopupConfig: ->
 		template = Template.instance()
 		return {
@@ -56,47 +73,58 @@ Template.messageBox.helpers
 			selfTyping: MsgTyping.selfTyping.get()
 			users: usernames.join " #{t 'and'} "
 		}
+
 	fileUploadAllowedMediaTypes: ->
 		return RocketChat.settings.get('FileUpload_MediaTypeWhiteList')
 
-	showMic: ->
-		if not Template.instance().isMessageFieldEmpty.get()
-			return
+	showFileUpload: ->
+		if (RocketChat.settings.get('FileUpload_Enabled'))
+			roomData = Session.get('roomData' + this._id)
+			if roomData?.t is 'd'
+				return RocketChat.settings.get('FileUpload_Enabled_Direct')
+			else
+				return true
+		else
+			return RocketChat.settings.get('FileUpload_Enabled')
 
-		if Template.instance().showMicButton.get()
-			return 'show-mic'
+
+	showMic: ->
+		return Template.instance().showMicButton.get()
 
 	showVRec: ->
-		if not Template.instance().isMessageFieldEmpty.get()
-			return 'hide-vrec'
-
-		if Template.instance().showVideoRec.get()
-			return ''
-		else
-			return 'hide-vrec'
+		return Template.instance().showVideoRec.get()
 
 	showSend: ->
-		if not Template.instance().isMessageFieldEmpty.get() or not Template.instance().showMicButton.get()
+		if not Template.instance().isMessageFieldEmpty.get()
 			return 'show-send'
 
 	showLocation: ->
-		return Template.instance().location.get() isnt false
+		return RocketChat.Geolocation.get() isnt false
 
 	notSubscribedTpl: ->
 		return RocketChat.roomTypes.getNotSubscribedTpl @_id
 
 	showSandstorm: ->
-		return Meteor.settings.public.sandstorm
+		return Meteor.settings.public.sandstorm && !Meteor.isCordova
 
 
 Template.messageBox.events
 	'click .join': (event) ->
 		event.stopPropagation()
 		event.preventDefault()
-		Meteor.call 'joinRoom', @_id
+		Meteor.call 'joinRoom', @_id, Template.instance().$('[name=joinCode]').val(), (err) ->
+			if err?
+				toastr.error t(err.reason)
 
-	'focus .input-message': (event) ->
+			if RocketChat.authz.hasAllPermission('preview-c-room') is false and RoomHistoryManager.getRoom(@_id).loaded is 0
+				RoomManager.getOpenedRoomByRid(@_id).streamActive = false
+				RoomManager.getOpenedRoomByRid(@_id).ready = false
+				RoomHistoryManager.getRoom(@_id).loaded = undefined
+				RoomManager.computation.invalidate()
+
+	'focus .input-message': (event, instance) ->
 		KonchatNotification.removeRoomNotification @_id
+		chatMessages[@_id].input = instance.find('.input-message')
 
 	'click .send-button': (event, instance) ->
 		input = instance.find('.input-message')
@@ -112,7 +140,12 @@ Template.messageBox.events
 		chatMessages[@_id].keyup(@_id, event, instance)
 		instance.isMessageFieldEmpty.set(chatMessages[@_id].isEmpty())
 
-	'paste .input-message': (e) ->
+	'paste .input-message': (e, instance) ->
+		Meteor.setTimeout ->
+			input = instance.find('.input-message')
+			input.updateAutogrow?()
+		, 50
+
 		if not e.originalEvent.clipboardData?
 			return
 
@@ -158,10 +191,10 @@ Template.messageBox.events
 
 		fileUpload filesToUpload
 
-	'click .message-form .icon-location.location': (event, instance) ->
+	'click .message-form .message-buttons.location': (event, instance) ->
 		roomId = @_id
 
-		position = instance.location.get()
+		position = RocketChat.Geolocation.get()
 
 		latitude = position.coords.latitude
 		longitude = position.coords.longitude
@@ -236,7 +269,6 @@ Template.messageBox.onCreated ->
 	@isMessageFieldEmpty = new ReactiveVar true
 	@showMicButton = new ReactiveVar false
 	@showVideoRec = new ReactiveVar false
-	@location = new ReactiveVar false
 
 	@autorun =>
 		videoRegex = /video\/webm|video\/\*/i
@@ -253,13 +285,18 @@ Template.messageBox.onCreated ->
 		else
 			@showMicButton.set false
 
-		if RocketChat.settings.get('MapView_Enabled') and RocketChat.settings.get('MapView_GMapsAPIKey')?.length and navigator.geolocation?.getCurrentPosition?
+
+Meteor.startup ->
+	RocketChat.Geolocation = new ReactiveVar false
+
+	Tracker.autorun ->
+		if RocketChat.settings.get('MapView_Enabled') is true and RocketChat.settings.get('MapView_GMapsAPIKey')?.length and navigator.geolocation?.getCurrentPosition?
 			success = (position) =>
-				@location.set position
+				RocketChat.Geolocation.set position
 
 			error = (error) =>
 				console.log 'Error getting your geolocation', error
-				@location.set false
+				RocketChat.Geolocation.set false
 
 			options =
 				enableHighAccuracy: true
@@ -268,4 +305,4 @@ Template.messageBox.onCreated ->
 
 			navigator.geolocation.watchPosition success, error
 		else
-			@location.set false
+			RocketChat.Geolocation.set false

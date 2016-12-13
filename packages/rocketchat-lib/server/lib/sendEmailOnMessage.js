@@ -1,6 +1,12 @@
+import moment from 'moment';
+
 RocketChat.callbacks.add('afterSaveMessage', function(message, room) {
 	// skips this callback if the message was edited
 	if (message.editedAt) {
+		return message;
+	}
+
+	if (message.ts && Math.abs(moment(message.ts).diff()) > 60000) {
 		return message;
 	}
 
@@ -32,17 +38,13 @@ RocketChat.callbacks.add('afterSaveMessage', function(message, room) {
 		var path = Meteor.absoluteUrl(roomPath ? roomPath.replace(/^\//, '') : '');
 		var style = [
 			'color: #fff;',
-			'padding: .5em;',
+			'padding: 9px 12px;',
+			'border-radius: 4px;',
 			'background-color: #04436a;',
-			'display: block;',
-			'width: 10em;',
-			'text-align: center;',
-			'text-decoration: none;',
-			'margin: auto;',
-			'margin-bottom: 8px;'
+			'text-decoration: none;'
 		].join(' ');
 		var message = TAPi18n.__('Offline_Link_Message');
-		return `<a style="${ style }" href="${ path }">${ message }</a>`;
+		return `<p style="text-align:center;margin-bottom:8px;"><a style="${ style }" href="${ path }">${ message }</a>`;
 	};
 
 	var divisorMessage = '<hr style="margin: 20px auto; border: none; border-bottom: 1px solid #dddddd;">';
@@ -116,7 +118,9 @@ RocketChat.callbacks.add('afterSaveMessage', function(message, room) {
 							html: header + messageHTML + divisorMessage + (linkByUser[user._id] || defaultLink) + footer
 						};
 
-						Email.send(email);
+						Meteor.defer(() => {
+							Email.send(email);
+						});
 
 						return true;
 					}

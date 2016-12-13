@@ -1,6 +1,6 @@
-RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
+class ModelSubscriptions extends RocketChat.models._Base
 	constructor: ->
-		@_initModel 'subscription'
+		super(arguments...)
 
 		@tryEnsureIndex { 'rid': 1, 'u._id': 1 }, { unique: 1 }
 		@tryEnsureIndex { 'rid': 1, 'alert': 1, 'u._id': 1 }
@@ -16,9 +16,16 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 		@tryEnsureIndex { 'mobilePushNotifications': 1 }, { sparse: 1 }
 		@tryEnsureIndex { 'emailNotifications': 1 }, { sparse: 1 }
 
+		this.cache.ensureIndex('rid', 'array')
+		this.cache.ensureIndex('u._id', 'array')
+		this.cache.ensureIndex(['rid', 'u._id'], 'unique')
+
 
 	# FIND ONE
 	findOneByRoomIdAndUserId: (roomId, userId) ->
+		if this.useCache
+			return this.cache.findByIndex('rid,u._id', [roomId, userId]).fetch()
+
 		query =
 			rid: roomId
 			"u._id": userId
@@ -27,6 +34,9 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 
 	# FIND
 	findByUserId: (userId, options) ->
+		if this.useCache
+			return this.cache.findByIndex('u._id', userId, options)
+
 		query =
 			"u._id": userId
 
@@ -71,6 +81,23 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 
 		return @find query, options
 
+	findByRoomId: (roomId, options) ->
+		if this.useCache
+			return this.cache.findByIndex('rid', roomId, options)
+
+		query =
+			rid: roomId
+
+		return @find query, options
+
+	findByRoomIdAndNotUserId: (roomId, userId, options) ->
+		query =
+			rid: roomId
+			'u._id':
+				$ne: userId
+
+		return @find query, options
+
 	getLastSeen: (options = {}) ->
 		query = { ls: { $exists: 1 } }
 		options.sort = { ls: -1 }
@@ -87,10 +114,9 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 		return @find query
 
 	# UPDATE
-	archiveByRoomIdAndUserId: (roomId, userId) ->
+	archiveByRoomId: (roomId) ->
 		query =
 			rid: roomId
-			'u._id': userId
 
 		update =
 			$set:
@@ -98,12 +124,11 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 				open: false
 				archived: true
 
-		return @update query, update
+		return @update query, update, { multi: true }
 
-	unarchiveByRoomIdAndUserId: (roomId, userId) ->
+	unarchiveByRoomId: (roomId) ->
 		query =
 			rid: roomId
-			'u._id': userId
 
 		update =
 			$set:
@@ -111,7 +136,7 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 				open: true
 				archived: false
 
-		return @update query, update
+		return @update query, update, { multi: true }
 
 	hideByRoomIdAndUserId: (roomId, userId) ->
 		query =
@@ -262,17 +287,19 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 
 		return @update query, update, { multi: true }
 
-	setAlertForRoomIdExcludingUserId: (roomId, userId, alert=true) ->
+	setAlertForRoomIdExcludingUserId: (roomId, userId) ->
 		query =
 			rid: roomId
-			alert:
-				$ne: alert
 			'u._id':
 				$ne: userId
+			$or: [
+				{ alert: { $ne: true } }
+				{ open: { $ne: true } }
+			]
 
 		update =
 			$set:
-				alert: alert
+				alert: true
 				open: true
 
 		return @update query, update, { multi: true }
@@ -306,6 +333,17 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 				roles: role
 
 		return @update query, update
+
+	setArchivedByUsername: (username, archived) ->
+		query =
+			t: 'd'
+			name: username
+
+		update =
+			$set:
+				archived: archived
+
+		return @update query, update, { multi: true }
 
 	# INSERT
 	createWithRoomAndUser: (room, user, extraData) ->
@@ -345,3 +383,5 @@ RocketChat.models.Subscriptions = new class extends RocketChat.models._Base
 			"u._id": userId
 
 		return @remove query
+
+RocketChat.models.Subscriptions = new ModelSubscriptions('subscription', true)

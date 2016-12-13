@@ -42,7 +42,7 @@ Tracker.autorun ->
 	if Meteor.userId()
 		RocketChat.Notifications.onUser 'message', (msg) ->
 			msg.u =
-				username: 'rocketbot'
+				username: 'rocket.cat'
 			msg.private = true
 
 			ChatMessage.upsert { _id: msg._id }, msg
@@ -55,20 +55,8 @@ Tracker.autorun ->
 
 	Dep = new Tracker.Dependency
 
-	init = ->
-		if CachedChatSubscription.ready.get()
-			return
-
-		CachedChatSubscription.init()
-
-		return
-
 	close = (typeName) ->
 		if openedRooms[typeName]
-			if openedRooms[typeName].sub?
-				for sub in openedRooms[typeName].sub
-					sub.stop()
-
 			if openedRooms[typeName].rid?
 				msgStream.removeAllListeners openedRooms[typeName].rid
 				RocketChat.Notifications.unRoom openedRooms[typeName].rid, 'deleteMessage', onDeleteMessageStream
@@ -95,14 +83,10 @@ Tracker.autorun ->
 				unless user?.username
 					return
 
-				record.sub = [
-					Meteor.subscribe 'room', typeName
-				]
-
 				if record.ready is true
 					return
 
-				ready = record.sub[0].ready() and CachedChatSubscription.ready.get() is true
+				ready = CachedChatRoom.ready.get() and CachedChatSubscription.ready.get() is true
 
 				if ready is true
 					type = typeName.substr(0, 1)
@@ -138,6 +122,8 @@ Tracker.autorun ->
 											RoomManager.updateMentionsMarksOfRoom typeName
 
 										RocketChat.callbacks.run 'streamMessage', msg
+
+										window.fireGlobalEvent('new-message', msg);
 
 							RocketChat.Notifications.onRoom openedRooms[typeName].rid, 'deleteMessage', onDeleteMessageStream
 
@@ -245,7 +231,6 @@ Tracker.autorun ->
 	open: open
 	close: close
 	closeAllRooms: closeAllRooms
-	init: init
 	getDomOfRoom: getDomOfRoom
 	existsDomOfRoom: existsDomOfRoom
 	msgStream: msgStream
@@ -254,7 +239,9 @@ Tracker.autorun ->
 	onlineUsers: onlineUsers
 	updateMentionsMarksOfRoom: updateMentionsMarksOfRoom
 	getOpenedRoomByRid: getOpenedRoomByRid
+	computation: computation
 
 
 RocketChat.callbacks.add 'afterLogoutCleanUp', ->
 	RoomManager.closeAllRooms()
+, RocketChat.callbacks.priority.MEDIUM, 'roommanager-after-logout-cleanup'

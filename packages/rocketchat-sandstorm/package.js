@@ -6,10 +6,8 @@ Package.describe({
 });
 
 Package.onUse(function(api) {
-	api.versionsFrom('1.0');
-
-	api.use([ 'ecmascript', 'rocketchat:lib' ]);
+	api.use([ 'ecmascript', 'rocketchat:lib', 'jalik:ufs', 'kadira:flow-router']);
 
 	api.addFiles([ 'server/lib.js', 'server/events.js', 'server/powerbox.js' ], 'server');
-	api.addFiles([ 'client/powerboxListener.js' ], 'client');
+	api.addFiles([ 'client/powerboxListener.js', 'client/setPath.js' ], 'client');
 });

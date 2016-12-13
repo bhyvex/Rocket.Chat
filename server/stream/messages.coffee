@@ -4,7 +4,12 @@ msgStream.allowWrite('none')
 
 msgStream.allowRead (eventName) ->
 	try
-		return false if not Meteor.call 'canAccessRoom', eventName, this.userId
+		room = Meteor.call 'canAccessRoom', eventName, this.userId
+		if not room
+			return false
+
+		if room.t is 'c' and not RocketChat.authz.hasPermission(this.userId, 'preview-c-room') and room.usernames.indexOf(room.username) is -1
+			return false
 
 		return true
 	catch e
@@ -32,10 +37,23 @@ Meteor.startup ->
 	if not RocketChat.settings.get 'Message_ShowEditedStatus'
 		fields = { 'editedAt': 0 }
 
-	RocketChat.models.Messages.on 'change', (type, args...) ->
-		records = RocketChat.models.Messages.getChangedRecords type, args[0], fields
+	publishMessage = (type, record) ->
+		if record._hidden isnt true and not record.imported?
+			msgStream.emitWithoutBroadcast '__my_messages__', record, {}
+			msgStream.emitWithoutBroadcast record.rid, record
 
-		for record in records
-			if record._hidden isnt true
-				msgStream.emit '__my_messages__', record, {}
-				msgStream.emit record.rid, record
+	query =
+		collection: RocketChat.models.Messages.collectionName
+
+	MongoInternals.defaultRemoteCollectionDriver().mongo._oplogHandle.onOplogEntry query, (action) ->
+		if action.op.op is 'i'
+			publishMessage 'inserted', action.op.o
+			return
+
+		if action.op.op is 'u'
+			publishMessage 'updated', RocketChat.models.Messages.findOne({_id: action.id})
+			return
+
+		# if action.op.op is 'd'
+		# 	publishMessage 'deleted', {_id: action.id}
+		# 	return
